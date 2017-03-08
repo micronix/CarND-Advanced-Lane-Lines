@@ -1,8 +1,3 @@
-##Writeup Template
-###You can use this file as a template for your writeup if you want to submit it as a markdown file, but feel free to use some other method and submit a pdf if you prefer.
-
----
-
 **Advanced Lane Finding Project**
 
 The goals / steps of this project are the following:
@@ -18,104 +13,206 @@ The goals / steps of this project are the following:
 
 [//]: # (Image References)
 
-[image1]: ./examples/undistort_output.png "Undistorted"
-[image2]: ./test_images/test1.jpg "Road Transformed"
-[image3]: ./examples/binary_combo_example.jpg "Binary Example"
-[image4]: ./examples/warped_straight_lines.jpg "Warp Example"
-[image5]: ./examples/color_fit_lines.jpg "Fit Visual"
-[image6]: ./examples/example_output.jpg "Output"
-[video1]: ./project_video.mp4 "Video"
-
-## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
-###Here I will consider the rubric points individually and describe how I addressed each point in my implementation.  
+[image1]: ./output_images/undistorted3.png "Undistorted"
+[image2]: ./output_images/undistorted2.png "Undistorted"
+[image3]: ./test_images/test1.jpg "Original"
+[image4]: ./output_images/undistorted1.jpg "Undistorted"
+[image5]: ./output_images/edges.png "Edges Example"
+[image6]: ./output_images/perspective1.png "Warp Example"
+[image7]: ./output_images/perspective2.png "Warp Example"
+[image8]: ./output_images/perspective3.png "Warp Example"
+[image9]: ./output_images/lane.png "Lane"
+[image10]: ./output_images/lane2.png "Lane"
+[image11]: ./output_images/lane3.png "Lane"
+[image12]: ./output_images/bad1.png "Lane"
+[image13]: ./output_images/bad2.png "Lane"
+[image14]: ./output_images/bad3.png "Lane"
+[video1]: ./project_video_annotated.mp4 "Video"
 
 ---
-###Writeup / README
+## Camera Calibration
 
-####1. Provide a Writeup / README that includes all the rubric points and how you addressed each one.  You can submit your writeup as markdown or pdf.  [Here](https://github.com/udacity/CarND-Advanced-Lane-Lines/blob/master/writeup_template.md) is a template writeup for this project you can use as a guide and a starting point.  
+The code for this step is contained in the file camera-calibration.py. We save the distortion matrix and the calibration matrix into a pickle file called calibration.p. This pickle file is then loaded in our pipeline.
 
-You're reading it!
-###Camera Calibration
+The calibration procedure is pretty simple and took most of the code from the lectures.
 
-####1. Briefly state how you computed the camera matrix and distortion coefficients. Provide an example of a distortion corrected calibration image.
+**Assumptions:**
 
-The code for this step is contained in the first code cell of the IPython notebook located in "./examples/example.ipynb" (or in lines # through # of the file called `some_file.py`).  
+Chessboard is flat, hence the z=0 for all the 3D points. The 3D points have coordinates (0,0,0), (0,1,0), ..., (9,6,0).
 
-I start by preparing "object points", which will be the (x, y, z) coordinates of the chessboard corners in the world. Here I am assuming the chessboard is fixed on the (x, y) plane at z=0, such that the object points are the same for each calibration image.  Thus, `objp` is just a replicated array of coordinates, and `objpoints` will be appended with a copy of it every time I successfully detect all chessboard corners in a test image.  `imgpoints` will be appended with the (x, y) pixel position of each of the corners in the image plane with each successful chessboard detection.  
+**Procedure:**
 
-I then used the output `objpoints` and `imgpoints` to compute the camera calibration and distortion coefficients using the `cv2.calibrateCamera()` function.  I applied this distortion correction to the test image using the `cv2.undistort()` function and obtained this result: 
+We create an list of points (0,0,0), (0,1,0), ..., (9,6,0), these will be the same for all the calibration images because we are using the same chessboard. The code to generate these points is:
+
+```python
+nx, ny = 9, 6
+objp = np.zeros((nx*ny,3), np.float32)
+objp[:,:2] = np.mgrid[0:9,0:6].T.reshape(-1,2)
+```
+These points will be reused for each image. We then call the function `cv2.findChessboardCorners` on each calibration image, which gives us 2D points. We create a list of 3D points `objpoints` by simply copying the created points `objp` and a list of 2D points `imgpoints` by appending the result from `cv2.findChessboardCorners`.
+
+We then used the output `objpoints` and `imgpoints` to compute the camera calibration and distortion coefficients using the `cv2.calibrateCamera()` function.  I applied this distortion correction to a chessboard image and a road test image using the `cv2.undistort()` function and obtained this result:
 
 ![alt text][image1]
-
-###Pipeline (single images)
-
-####1. Provide an example of a distortion-corrected image.
-To demonstrate this step, I will describe how I apply the distortion correction to one of the test images like this one:
 ![alt text][image2]
-####2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.
-I used a combination of color and gradient thresholds to generate a binary image (thresholding steps at lines # through # in `another_file.py`).  Here's an example of my output for this step.  (note: this is not actually from one of the test images)
 
-![alt text][image3]
+You can clearly see the effects by looking at the right edge of the image near the back of the white car and a little up on the trees.
 
-####3. Describe how (and identify where in your code) you performed a perspective transform and provide an example of a transformed image.
+## Edge Detection
 
-The code for my perspective transform includes a function called `warper()`, which appears in lines 1 through 8 in the file `example.py` (output_images/examples/example.py) (or, for example, in the 3rd code cell of the IPython notebook).  The `warper()` function takes as inputs an image (`img`), as well as source (`src`) and destination (`dst`) points.  I chose the hardcode the source and destination points in the following manner:
+The code for this part of the pipeline is found in the file edge.py.
 
-```
-src = np.float32(
-    [[(img_size[0] / 2) - 55, img_size[1] / 2 + 100],
-    [((img_size[0] / 6) - 10), img_size[1]],
-    [(img_size[0] * 5 / 6) + 60, img_size[1]],
-    [(img_size[0] / 2 + 55), img_size[1] / 2 + 100]])
-dst = np.float32(
-    [[(img_size[0] / 4), 0],
-    [(img_size[0] / 4), img_size[1]],
-    [(img_size[0] * 3 / 4), img_size[1]],
-    [(img_size[0] * 3 / 4), 0]])
+I used a combination of gradient and color thresholds on the S channel of an HLS image.For the gradients I used a sobel kernel of size 3 with the following thresholds:
 
-```
-This resulted in the following source and destination points:
+| Type | Min | Max |
+|:-------------:|:-------------:|:-----:|
+| X | 50 | 200 |
+| Y | 50 | 200 |
+| Magnitude | 20 | 100 |
+| Direction | 0.7 | 1.3 |
 
-| Source        | Destination   | 
-|:-------------:|:-------------:| 
-| 585, 460      | 320, 0        | 
-| 203, 720      | 320, 720      |
-| 1127, 720     | 960, 720      |
-| 695, 460      | 960, 0        |
+A final gradient binary was created, where a pixel is on if both gradient in x direction and gradient in y direction are on, or if gradient magnitude is on and gradient direction is on.
 
-I verified that my perspective transform was working as expected by drawing the `src` and `dst` points onto a test image and its warped counterpart to verify that the lines appear parallel in the warped image.
-
-![alt text][image4]
-
-####4. Describe how (and identify where in your code) you identified lane-line pixels and fit their positions with a polynomial?
-
-Then I did some other stuff and fit my lane lines with a 2nd order polynomial kinda like this:
+I also added a threshold on the S channel between 150 and 255. The following is the output where green is a binary of gradient and blue is the color threshold.
 
 ![alt text][image5]
 
-####5. Describe how (and identify where in your code) you calculated the radius of curvature of the lane and the position of the vehicle with respect to center.
+This is what seemed to give the clearest lane lines.
 
-I did this in lines # through # in my code in `my_other_file.py`
+## Perspective Transform
 
-####6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
+The code that calculates my perspective matrix is in the file **perspective-transform.py**. I manually found the source and destination points. The example writeup provided a good starting point.
 
-I implemented this step in lines # through # in my code in `yet_another_file.py` in the function `map_lane()`.  Here is an example of my result on a test image:
+The 4 points for my source and destination that I ended up with are:
+
+```
+src = np.float32(
+    [[100, h],
+    [(w / 2) - 90, h / 2 + 110],
+    [(w / 2 + 90), h / 2 + 110],
+    [w-100, h]])
+
+dst = np.float32(
+    [[100, h],
+    [100, 0],
+    [w - 100, 0],
+    [w - 100, h]])
+```
+This resulted in the following source and destination points:
+
+| Source        | Destination   |
+|:-------------:|:-------------:|
+| 100, 720      | 100, 720        |
+| 550, 470      | 100, 0      |
+| 730, 470     | 1180, 0      |
+| 1180, 720      | 1180, 720        |
+
+I verified that my perspective transform was working as expected by drawing the `src` and `dst` points onto a test image and its warped counterpart to verify that the lines appear parallel in the warped image.
 
 ![alt text][image6]
+![alt text][image7]
+
+Below is a curved test image.
+
+![alt text][image8]
+
+#### Curve fitting
+
+`pipeline.py` contains the code to track the lane. The pipeline functions as follows:
+
+- **initialize_lanes** This finds the lanes using the sliding window method.
+
+  We first need to find all the edges and look at it from a bird's eye view:
+  - Undistort image
+  - Convert to a binary image using gradients and color thresholds
+  - Perform a perspective transform on the image
+
+  We then look at a histogram of the bottom half of the image. The maximum points in the histogram are assumed to be the beginning of the lane lines. My implementation used 9 windows. The algorithm worked as follows:
+  - Center a right window on the max of the histogram on the left side of the image
+  - Find all the nonzero points inside the window
+  - Take the mean x value of those points
+  - Center the next window on the x-mean of the previous window
+  - Perform for the remaining windows.
+  - This will give us a set of points inside the windows that we can use to perform a curve fitting.
+
+  I used a second degree polynomial to fit the points
+
+Once I had a polynomial I didn't need to find the windows again in the next frame, instead I used the curve with the same margin size as the windows to find points to fit in the second frame. This simplified finding the lane points.
+
+When the algorithm had problems finding the lane lines, in some cases the right lane would move to the left and find the same points as the right lane. In order to prevent this from happening, I added sanity checks to the lane lines.
+
+**Sanity Checks**
+
+If one lane line curves to the left and the other one curves to the right, or one curves much more than the other curve there is probably an error. Also if the lane lines are too close to each other, one lane line probably switched from the left to the right or vice versa.
+
+**Curve Averaging**
+
+To smooth imperfections in the images from frame to frame, I average the polynomal fit over the past 5 frames. This means that a strange frame will not make us completly start searching windows from scratch.
+
+In file pipeline.py I created a Tracker class that tracks the lane lines by first. There is a method called *initialize_lanes* that uses the sliding window method to track the lane lines. There is a second method called *process* which uses the already found
+The code for curve fitting can be found in the file pipeline.py on lines 128 to 185.
+
+The function *bad_curve* determines if the curves are bad and we should start the window algorithm again. I also have a `Line` class and a `Window` class. The `Line` class stores the last 5 polynomal fits and can average them. The method `inside` finds the points inside the region defined by the polynomal fit, the margin lets us know how far away from the curve to search for points.
+
+The `Window` class also has an `inside` method to find points inside the window.
+
+Below is an image showing the identified lane.
+
+![alt text][image9]
+
+#### 5. Radius of Curvature
+
+I did this in the `Line` class between lines 63-78 in file pipeline.py. I performed the same procedure that was outlined in the *Measuring Curvature* section. We first need to convert the curve points to world space and then fit another line. These new coefficients will be used in the formula for calculating curvature.
+
+#### 6. Lane Identification
+
+When changing the perspective of my image I save an invese matrix to undo the warped perspective. Using the polynomal fit I generated points for the left and right lanes. These points were then used to draw a filled polynomal. I then performed the inverse perspective transform and added it to the original image. The code to add the lane to the image is found in file `pipeline.py` line 292-306.
+
+Below are a few examples of my algorithm identifying the lane.
+
+![alt text][image9]
+![alt text][image10]
+![alt text][image11]
 
 ---
 
-###Pipeline (video)
+### Pipeline (video)
 
-####1. Provide a link to your final video output.  Your pipeline should perform reasonably well on the entire project video (wobbly lines are ok but no catastrophic failures that would cause the car to drive off the road!).
 
-Here's a [link to my video result](./project_video.mp4)
+Here's a [link to my video result](./project_video_annotated.mp4)
 
 ---
 
-###Discussion
+### Discussion
 
-####1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?
+The biggest problem that I had initially was that the right lane would jump from the right to the left and become the same line. From that point on the right lane would not be found.
 
-Here I'll talk about the approach I took, what techniques I used, what worked and why, where the pipeline might fail and how I might improve it if I were going to pursue this project further.  
+This problem was solved by doing a sanity check and performing the lane finding algorithm again.
 
+Overall when there are no cars in the lane performs well. I did try the algorithm on the challenge videos and found some issues that we need to come up with in order for the algorithm to be better.
+
+The possible challenges are:
+
+**Glare**
+
+Glare on the windshield generates too many gradient points. Here is an example screenshot:
+
+![alt text][image13]
+
+One way to deal with this is could be to add a glare filter to the lense of the camera. I don't know much about lenses but I think that this might be possible. Maybe also detect this type of glare and simply drop any fits when there is too much glare at the bottom. As a driver if I would see this, I would just continue the direction I'm going and wait for the glare to go away.
+
+**Sharp Turns**
+
+The hard challenge video had really hard turns. We can see that right lane is not visible with out birds-eye perspective because it is so far to the right. The left lane was all the way into the space of the right lane. I also noticed that the second degree polynomial was not a good fit in some cases.
+
+![alt text][image12]
+
+One possible thing to do would be to fit a higher order degree polynomal as well in order to detect if there are sharp upcoming turns in the road.
+
+**Multi-colored Roads**
+
+Another problem is when a road is paved with darker asphalt in one area and not as dark asphalt in another area as shown in the image below:
+
+![alt text][image14]
+
+The image could probably be improved if we tune our parameters of distance between lines, however, if the pavement was closer to the left lane it would still not work. One possible fix could be to perform the binary gradient on colors that lane lines couuld be.
