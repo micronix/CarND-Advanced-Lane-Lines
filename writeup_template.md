@@ -68,16 +68,16 @@ I used a combination of gradient and color thresholds on the S channel of an HLS
 |:-------------:|:-------------:|:-----:|
 | X | 50 | 200 |
 | Y | 50 | 200 |
-| Magnitude | 20 | 100 |
+| Magnitude | 115 | 100 |
 | Direction | 0.7 | 1.3 |
 
 A final gradient binary was created, where a pixel is on if both gradient in x direction and gradient in y direction are on, or if gradient magnitude is on and gradient direction is on.
 
-I also added a threshold on the S channel between 150 and 255. The following is the output where green is a binary of gradient and blue is the color threshold.
+I also added a threshold on the S channel between 90 and 255, and the R-channel from the RGB space with a threshold between 200 and 255. The following is a visualization of this, with the red being the R-channel binary, green being the S-channel binary, and blue being the gradient logic (gradx && grady || grad_mag && grad_dir)
 
 ![alt text][image5]
 
-This is what seemed to give the clearest lane lines.
+This is what seemed to give the clearest lane lines. In my previous submission I was relying mainly on gradients, a suggestion that was give to me was to rely more on colr thresholds, which seemed to improve things quite a bit.
 
 ## Perspective Transform
 
@@ -145,6 +145,8 @@ When the algorithm had problems finding the lane lines, in some cases the right 
 
 If one lane line curves to the left and the other one curves to the right, or one curves much more than the other curve there is probably an error. Also if the lane lines are too close to each other, one lane line probably switched from the left to the right or vice versa.
 
+I also assumed that the bottom of the lane lines won't change too much between frames. If the x position of the bottom of the lane lines changes by more than 15 pixels then that probably means that we might have shadows or weird effects. When this happens, the fit doesn't get added to the list of lane lines. I implemented this suggestion after looking at some suggstions from other students in the class.
+
 **Curve Averaging**
 
 To smooth imperfections in the images from frame to frame, I average the polynomal fit over the past 5 frames. This means that a strange frame will not make us completly start searching windows from scratch.
@@ -160,7 +162,7 @@ Below is an image showing the identified lane.
 
 ![alt text][image9]
 
-#### 5. Radius of Curvature
+#### 5. Radius of Curvature & position of car
 
 I did this in the `Line` class between lines 63-78 in file pipeline.py. I performed the same procedure that was outlined in the *Measuring Curvature* section. We first need to convert the curve points to world space and then fit another line. These new coefficients will be used in the formula for calculating curvature.
 

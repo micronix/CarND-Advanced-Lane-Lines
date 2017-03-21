@@ -4,97 +4,12 @@ from edge import edges
 from camera import undistort
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
-from collections import deque
 import numpy as np
 import cv2
 from moviepy.editor import VideoFileClip
-
-class Window:
-    def __init__(self, y1, y2, x, margin=100, minpix=50):
-        self.margin = margin
-        self.minpix = minpix
-        self.y1, self.y2, self.x = y1, y2, x
-
-    # This method returns the indices of the nonzero arrays that are inside the window
-    def inside(self, nonzero):
-        window_inds = (
-            (nonzero[0] >= self.y1) & (nonzero[0] < self.y2) &
-            (nonzero[1] >= self.x - self.margin) & (nonzero[1] < self.x + self.margin)
-        ).nonzero()[0]
-        return window_inds
-
-class Line:
-    def __init__(self, h, w, margin):
-        self.fits = deque([], 5)
-        self.margin = margin
-        self.h = h
-        self.w = w
-
-        # was the line detected in the last iteration?
-        self.detected = False
-        # x values of the last n fits of the line
-        self.recent_xfitted = []
-        #average x values of the fitted line over the last n iterations
-        self.bestx = None
-        #polynomial coefficients averaged over the last n iterations
-        self.best_fit = None
-        #polynomial coefficients for the most recent fit
-        self.current_fit = [np.array([False])]
-        #radius of curvature of the line in some units
-        self.radius_of_curvature = None
-        #distance in meters of vehicle center from the line
-        self.line_base_pos = None
-        #difference in fit coefficients between last and new fits
-        self.diffs = np.array([0,0,0], dtype='float')
-        #x values for detected line pixels
-        self.allx = None
-        #y values for detected line pixels
-        self.ally = None
-
-    def inside(self, nonzero):
-        #fit = self.fits[0]
-        fit = np.average(self.fits, axis=0)
-        inds = (
-            (nonzero[1] > (fit[0]*(nonzero[0]**2) + fit[1]*nonzero[0] + fit[2] - self.margin)) &
-            (nonzero[1] < (fit[0]*(nonzero[0]**2) + fit[1]*nonzero[0] + fit[2] + self.margin))
-        )
-        return inds
-
-    def curvature(self, fit=None):
-        ym_per_pix = 27 / 720  # meters per pixel in y dimension
-        xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
-
-        # Fit new polynomials to x,y in world space
-        points = self.points(fit)
-        y = points[:, 1]
-        x = points[:, 0]
-        fit_cr = np.polyfit(y * ym_per_pix, x * xm_per_pix, 2)
-        return int(((1 + (2 * fit_cr[0] * 720 * ym_per_pix + fit_cr[1]) ** 2) ** 1.5) / np.absolute(2 * fit_cr[0]))
-
-    def position(self):
-        points = self.points()
-        xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
-        x = points[np.max(points[:, 1])][0]
-        return np.absolute((self.w // 2 - x) * xm_per_pix)
-
-    def add(self, leftx, lefty):
-        if len(leftx) > 0:
-            fit = np.polyfit(lefty, leftx, 2)
-            self.fits.appendleft(fit)
-
-    def points(self, fit=None):
-        y = np.linspace(0, self.h - 1, self.h)
-        if fit == None:
-            fit = np.average(self.fits, axis=0)
-        return np.stack((fit[0] * y ** 2 + fit[1] * y + fit[2], y)).astype(np.int).T
-
-    def current(self):
-        y = np.linspace(0, self.h - 1, self.h)
-        fit = self.fits[0]
-        return (fit[0]*y**2 + fit[1]*y + fit[2]), y
-
-    def current_curve(self):
-        return self.fits[0]
+from window import Window
+from line import Line
+import calcs
 
 class Tracker:
     def __init__(self, frame, nwindows=9):
@@ -180,10 +95,27 @@ class Tracker:
         rightx = nonzero[1][right_lane_inds]
         righty = nonzero[0][right_lane_inds]
 
+        dist = self.add_curves(leftx, lefty, rightx, righty)
+        if dist != 0:
+            print('distances', dist)
+
         # Fit a second order polynomial to each
         self.left_fit.add(leftx, lefty)
         self.right_fit.add(rightx, righty)
 
+    def add_curves(self, leftx, lefty, rightx, righty):
+        if len(leftx) == 0:
+            return False
+        if len(rightx) == 0:
+            return False
+        fitx = np.polyfit(lefty, leftx, 2)
+        fity = np.polyfit(righty, rightx, 2)
+
+        #method = cv2.CV_CONTOURS_MATCH_I1
+        method = 1
+        dist = cv2.matchShapes(fitx, fity, method, 0)
+
+        return dist
 
     def save_frame(self, frame):
         #print('saving frame', self.count)
@@ -217,25 +149,25 @@ class Tracker:
         rightx = nonzero[1][right_lane_inds]
         righty = nonzero[0][right_lane_inds]
 
-
         # Fit a second order polynomial to each
-        self.left_fit.add(leftx, lefty)
-        self.right_fit.add(rightx, righty)
-
-        if self.bad_curve():
-            print('refinding-window')
+        if self.bad_curve(leftx, lefty, rightx, righty):
             self.initialize_lanes(frame)
+        else:
+            self.left_fit.add(leftx, lefty)
+            self.right_fit.add(rightx, righty)
 
 
         frame[:250, :, :] = frame[:250, :, :] * .4
 
-
         # display overhead edge detection
         binary = self.draw_edges(binary_warped)
+
+        # write curve values for frame
         self.file.write(str(self.left_fit.current_curve()))
         self.file.write(str(self.right_fit.current_curve()))
         self.file.write("\n")
         self.file.flush()
+
         cv2.imwrite("debug/edges"+str(self.count).zfill(4)+".png", binary)
         binary = cv2.resize(binary, (0, 0), fx=0.3, fy=0.3)
         frame[20:20 + binary.shape[0], 20:20 + binary.shape[1], :] = binary
@@ -249,7 +181,16 @@ class Tracker:
 
         text_x = 20 * 3 + top.shape[1] * 2
         self.draw_text(frame, "radius left: {} right: {}".format(self.left_fit.curvature(), self.right_fit.curvature()),text_x,80)
-        self.draw_text(frame, "position left: {:.1f} right: {:.1f}".format(self.left_fit.position(), self.right_fit.position()),text_x,140)
+
+        left_position = self.left_fit.position()
+        right_position = self.right_fit.position()
+        self.draw_text(frame, "position left: {:.1f}m right: {:.1f}m".format( left_position, right_position),text_x,140)
+
+        lane_mid = (self.left_fit.bottomx() + self.right_fit.bottomx()) / 2
+        car_mid = (self.w / 2)
+        offset = (car_mid - lane_mid) * 3.7 / 700 * 0.77
+        self.draw_text(frame, "lane offset: {:.1f}m".format(offset), text_x, 200)
+
 
         return self.draw_lane(frame)
 
@@ -278,16 +219,6 @@ class Tracker:
         result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
 
         return result
-
-        # plt.imshow(result)
-        # plt.plot(left_fitx, ploty, color='yellow')
-        # plt.plot(right_fitx, ploty, color='yellow')
-        # plt.xlim(0, 1280)
-        # plt.ylim(720, 0)
-        # plt.show()
-
-        return out_img
-
 
     def draw_lane(self, frame):
         # Create an image to draw the lines on
@@ -323,17 +254,41 @@ class Tracker:
         image = cv2.addWeighted(frame, 1, overlay, 0.3, 0)
         return image
 
-    def bad_curve(self):
-        curv_diff = self.left_fit.curvature() - self.right_fit.curvature()
-        pos_diff = self.right_fit.position() - self.left_fit.position()
+    def lane_width(self, left, right):
+        return right - left
+
+
+    # return true if the radius of curvature is widely different between lanes
+    # or the lane width is too wide or too thin, when this happens we want to
+    # perform the window search algorithm
+    def bad_curve(self, leftx, lefty, rightx, righty):
+        print(len(leftx), len(rightx))
+        if len(leftx) == 0 or len(rightx) == 0:
+            return True
+        points_left = calcs.points(self.h, leftx, lefty)
+        points_right = calcs.points(self.h, rightx, righty)
+
+        curve_left = calcs.curvature(points_left)
+        curve_right = calcs.curvature(points_right)
+        #print('curve', curve_left, curve_right)
+
+        position_left = calcs.position(points_left)
+        position_right = calcs.position(points_right)
+        #print('position', position_left, position_right)
+        #print('lane width', self.lane_width(position_left, position_right))
+
+        curve_diff = abs(curve_left - curve_right)
+        pos_diff = abs(position_left - position_right)
+
+        #print('curve', curve_diff, 'position', pos_diff)
 
         # If the curvature of the lane lines doesn't make sense perform window
         # algorithm again
-        if abs(curv_diff) > 80:
+        if abs(curve_diff) > 100:
             return True
 
         # if lane lines are too close together perform window algorithm again
-        if pos_diff > 0.1:
+        if pos_diff > 4.0 or pos_diff < 3.4:
             return True
 
         return False
@@ -346,7 +301,7 @@ plt.imshow(image)
 plt.show()
 """
 
-video_name = "project_video"
+video_name = "challenge_video"
 video_output_name = video_name + '_annotated.mp4'
 video = VideoFileClip(video_name + ".mp4")
 tracker = Tracker(video.get_frame(0))
